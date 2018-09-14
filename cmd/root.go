@@ -16,9 +16,11 @@ package cmd
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"os/user"
+	"path/filepath"
 
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -55,35 +57,92 @@ func init() {
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.jot.yaml)")
+	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.jot.yaml)")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	// rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	if cfgFile != "" {
-		// Use config file from the flag.
-		viper.SetConfigFile(cfgFile)
-	} else {
-		// Find home directory.
-		home, err := homedir.Dir()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
 
-		// Search config in home directory with name ".jot" (without extension).
-		viper.AddConfigPath(home)
-		viper.SetConfigName(".jot")
+	viper.SetConfigName("config") // name of config file (without extension)
+	viper.AddConfigPath("$HOME/.jot")
+	err := viper.ReadInConfig() // Find and read the config file
+	if err != nil {
+		defaultConfig()
+		viper.ReadInConfig()
 	}
-
+	// if cfgFile != "" {
+	// 	// Use config file from the flag.
+	// 	viper.SetConfigFile(cfgFile)
+	// } else {
+	// 	// Find home directory.
+	// 	home, err := homedir.Dir()
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		os.Exit(1)
+	// 	}
+	//
+	// 	// Search config in home directory with name ".jot" (without extension).
+	// 	viper.AddConfigPath(home)
+	// 	viper.SetConfigName(".jot")
+	// }
+	//
 	viper.AutomaticEnv() // read in environment variables that match
+	//
+	// // If a config file is found, read it in.
+	// if err := viper.ReadInConfig(); err == nil {
+	// 	fmt.Println("Using config file:", viper.ConfigFileUsed())
+	// }
+}
 
-	// If a config file is found, read it in.
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+func defaultConfig() *viper.Viper {
+	usr, _ := user.Current()
+
+	config := viper.New()
+	config.SetConfigName("config")
+	config.AddConfigPath("$HOME/.jot")
+	config.Set("templates.journal", filepath.Join(usr.HomeDir, ".jot/templates/journal-v01.md"))
+	config.Set("library", filepath.Join(usr.HomeDir, ".jot/library"))
+
+	err1 := os.MkdirAll(filepath.Join(usr.HomeDir, ".jot"), os.ModePerm)
+	if err1 != nil {
+		panic(fmt.Errorf("Fatal error mkdirAll: %s \n", err1))
 	}
+	err := config.WriteConfigAs(filepath.Join(usr.HomeDir, ".jot/config.yaml"))
+	if err != nil {
+		panic(fmt.Errorf("Fatal error writing config file: %s \n", err))
+	}
+	saveDefaultTemplates(config)
+	createLibrary(config)
+
+	return config
+}
+
+func saveDefaultTemplates(v *viper.Viper) {
+	if _, err := os.Stat(v.GetString("templates.journal")); err == nil {
+		return
+	}
+
+	tmpl := `# {{.Title}}
+
+## Goals
+
+## Standup
+
+## Notes
+`
+	os.MkdirAll(filepath.Dir(v.GetString("templates.journal")), os.ModePerm)
+	ioutil.WriteFile(v.GetString("templates.journal"), []byte(tmpl), 0666)
+}
+
+func createLibrary(v *viper.Viper) {
+	if _, err := os.Stat(v.GetString("library")); err == nil {
+		fmt.Println("Found library")
+		return
+	}
+	fmt.Println("Creating library " + v.GetString("library"))
+	os.MkdirAll(v.GetString("library"), os.ModePerm)
 }
